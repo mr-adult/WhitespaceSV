@@ -1,3 +1,5 @@
+#![doc = include_str!("../README.md")]
+
 use std::borrow::Cow;
 use std::mem::take;
 use std::str::CharIndices;
@@ -65,6 +67,7 @@ pub fn parse_with_col_count(
     Ok(result)
 }
 
+/// A struct for writing values to a .wsv file.
 pub struct WSVWriter<'values, OuterIter, InnerIter>
 where
     OuterIter: IntoIterator<Item = InnerIter>,
@@ -111,7 +114,7 @@ where
                         match max_col_widths.get_mut(i) {
                             None => max_col_widths.push(col_len),
                             Some(max) => {
-                                if *max < col_len { 
+                                if *max < col_len {
                                     *max = col_len
                                 }
                             }
@@ -496,8 +499,8 @@ impl Location {
 
 #[cfg(debug_assertions)]
 mod tests {
-    use std::{borrow::Cow, fmt::write};
     use super::{parse, WSVWriter};
+    use std::{borrow::Cow, fmt::write};
 
     #[test]
     fn read_and_write() {
@@ -518,15 +521,17 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        let as_refs = result.iter()
+        let as_refs = result
+            .iter()
             .map(|vec| {
-                vec.iter().map(|str_opt| {
-                    match str_opt {
+                vec.iter()
+                    .map(|str_opt| match str_opt {
                         None => None,
                         Some(string) => Some(string.as_str()),
-                    }
-                }).collect::<Vec<_>>()
-            }).collect::<Vec<_>>();
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
 
         let result_str = WSVWriter::new(as_refs)
             .align_columns(super::ColumnAlignment::Packed)
@@ -652,5 +657,31 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn readme_example() {
+        use crate::{WSVWriter, ColumnAlignment};
+        // Build up the testing value set. This API accepts any
+        // type that implements IntoIterator, so LinkedList,
+        // VecDeque and many others are accepted as well.
+        let values = vec![
+            vec!["1", "2", "3"],
+            vec!["4", "5", "6"],
+            vec!["My string with a \n character"],
+            vec!["My string with many \"\"\" characters"],
+        ];
+
+        let values_as_opts = values
+            .into_iter()
+            .map(|row| row.into_iter().map(|value| Some(value)));
+
+        let wsv = WSVWriter::new(values_as_opts)
+            // The default is packed, but left and right are also options
+            // if your .wsv file will be looked at by people
+            .align_columns(ColumnAlignment::Packed)
+            .to_string();
+
+        println!("{}", wsv);
     }
 }

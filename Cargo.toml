@@ -1,14 +1,13 @@
 [package]
-name = "WhitespaceSV"
+name = "whitespacesv"
 version = "0.1.0"
 edition = "2021"
-description = "A Rust implementation of a parser/writer for the Whitespace-Separated Value format, as defined by Stenway. See https://dev.stenway.com/WSV/"
+description = "A Rust implementation of a parser/writer for the Whitespace-Separated Value format, as defined by Stenway. See https://dev.stenway.com/WSV/. WSV offers an unambiguous alternative to CSV."
 license = "MIT"
-repository = ""
+repository = "https://github.com/mr-adult/WhitespaceSV"
+documentation = "https://docs.rs/tree_iterators_rs/latest/whitespacesv/"
+keywords = ["wsv", "whitespace", "separated", "value", "ReliableTXT"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-
-
-[features]
