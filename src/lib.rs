@@ -68,19 +68,21 @@ pub fn parse_with_col_count(
 }
 
 /// A struct for writing values to a .wsv file.
-pub struct WSVWriter<'values, OuterIter, InnerIter>
+pub struct WSVWriter<OuterIter, InnerIter, BorrowStr>
 where
     OuterIter: IntoIterator<Item = InnerIter>,
-    InnerIter: IntoIterator<Item = Option<&'values str>>,
+    InnerIter: IntoIterator<Item = Option<BorrowStr>>,
+    BorrowStr: AsRef<str>,
 {
     align_columns: ColumnAlignment,
     values: OuterIter,
 }
 
-impl<'values, OuterIter, InnerIter> WSVWriter<'values, OuterIter, InnerIter>
+impl<OuterIter, InnerIter, BorrowStr> WSVWriter<OuterIter, InnerIter, BorrowStr>
 where
     OuterIter: IntoIterator<Item = InnerIter>,
-    InnerIter: IntoIterator<Item = Option<&'values str>>,
+    InnerIter: IntoIterator<Item = Option<BorrowStr>>,
+    BorrowStr: AsRef<str> + From<&'static str> + ToString,
 {
     pub fn new(values: OuterIter) -> Self {
         Self {
@@ -100,15 +102,21 @@ where
                 let vecs = self
                     .values
                     .into_iter()
-                    .map(|inner| inner.into_iter().collect::<Vec<Option<&'values str>>>())
-                    .collect::<Vec<Vec<Option<&'values str>>>>();
+                    .map(|inner| inner.into_iter().collect::<Vec<Option<BorrowStr>>>())
+                    .collect::<Vec<Vec<Option<BorrowStr>>>>();
 
                 let mut max_col_widths = Vec::new();
                 for line in vecs.iter() {
                     for (i, col) in line.iter().enumerate() {
                         let mut col_len = 0;
-                        for _ in col.unwrap_or("-").chars() {
-                            col_len += 1;
+
+                        match col {
+                            None => col_len = 1,
+                            Some(col) => {
+                                for _ in col.as_ref().chars() {
+                                    col_len += 1;
+                                }
+                            }
                         }
 
                         match max_col_widths.get_mut(i) {
@@ -132,7 +140,7 @@ where
 
     fn to_string_inner<
         Outer: IntoIterator<Item = Inner>,
-        Inner: IntoIterator<Item = Option<&'values str>>,
+        Inner: IntoIterator<Item = Option<BorrowStr>>,
     >(
         iters: Outer,
         alignment: ColumnAlignment,
@@ -145,9 +153,20 @@ where
                     result.push_str(" ");
                 }
 
-                let value = col.unwrap_or("-");
-                let str_to_push = match alignment {
-                    ColumnAlignment::Packed => Cow::Borrowed(value),
+                let is_none;
+                let value = match col.as_ref() {
+                    None => {
+                        is_none = true;
+                        "-"
+                    },
+                    Some(string) => {
+                        is_none = false;
+                        string.as_ref()
+                    }
+                };
+
+                let str_to_push: Cow<'_, str> = match alignment {
+                    ColumnAlignment::Packed => Cow::Borrowed(&value),
                     ColumnAlignment::Left => {
                         let mut value_string = value.to_string();
                         for _ in value.len()..max_col_widths.as_ref().unwrap()[i] {
@@ -160,12 +179,24 @@ where
                         for _ in value.len()..=max_col_widths.as_ref().unwrap()[i] {
                             value_string.push(' ');
                         }
-                        value_string.push_str(col.unwrap_or("-"));
+                        match col {
+                            None => value_string.push('-'),
+                            Some(borrow) => {
+                                value_string.push_str(borrow.as_ref())
+                            } 
+                        }
                         Cow::Owned(value_string)
                     }
                 };
 
-                result.push('"');
+                if !is_none {
+                    result.push('"');
+                } else {
+                    if let ColumnAlignment::Right = alignment {
+                        result.push(' ');
+                        result.push(' ');
+                    }
+                }
                 for ch in str_to_push.chars() {
                     if ch == '\n' {
                         result.push('"');
@@ -178,7 +209,14 @@ where
                         result.push(ch);
                     }
                 }
-                result.push('"');
+                if !is_none {
+                    result.push('"');
+                } else {
+                    if let ColumnAlignment::Left = alignment {
+                        result.push(' ');
+                        result.push(' ');
+                    }
+                }
             }
             result.push('\n')
         }
@@ -521,19 +559,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        let as_refs = result
-            .iter()
-            .map(|vec| {
-                vec.iter()
-                    .map(|str_opt| match str_opt {
-                        None => None,
-                        Some(string) => Some(string.as_str()),
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .collect::<Vec<_>>();
-
-        let result_str = WSVWriter::new(as_refs)
+        let result_str = WSVWriter::new(result)
             .align_columns(super::ColumnAlignment::Packed)
             .to_string();
 
@@ -661,7 +687,7 @@ mod tests {
 
     #[test]
     fn readme_example() {
-        use crate::{WSVWriter, ColumnAlignment};
+        use crate::{ColumnAlignment, WSVWriter};
         // Build up the testing value set. This API accepts any
         // type that implements IntoIterator, so LinkedList,
         // VecDeque and many others are accepted as well.
@@ -683,5 +709,28 @@ mod tests {
             .to_string();
 
         println!("{}", wsv);
+    }
+
+    #[test]
+    fn in_and_out_with_cows() {
+        let str = include_str!("../tests/1_stenway.com");
+
+        let values = parse(str).unwrap();
+        let output = WSVWriter::new(values)
+            .align_columns(crate::ColumnAlignment::Right)
+            .to_string();
+
+        println!("{}", output);
+    }
+
+    #[test]
+    fn writing_strings() {
+        let values = vec![vec![None, Some("test".to_string())]];
+
+        let output = WSVWriter::new(values)
+            .align_columns(crate::ColumnAlignment::Packed)
+            .to_string();
+
+        println!("{}", output);
     }
 }
