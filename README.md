@@ -16,7 +16,13 @@ In order to parse a WSV file using this crate, simply call one of the provided p
 
 ## Writing
 
-There is only one API provided to write a WSV file. It is done as follows. This API will surround _all_ strings with quotes to avoid unnecessary scans of the content, but this is not necessary under the standard. Currently, it only supports writing &str values, but support for Cow<'_, str> and String values are on the roadmap for this crate as well.
+There is only one API provided to write a WSV file. It is done as follows. This API will surround _all_ strings with quotes to avoid unnecessary scans of the content, but this is not necessary under the standard. The values in this 2D IntoIterator structure must be a type that implements 
+1. BorrowStr, 
+2. AsRef<str>, 
+3. From<&'static str>, and 
+4. ToString. 
+
+The &str, Cow<'_, str>, String, and &String types are all supported with these type constraints.
 
 ```rust
 use whitespacesv::{WSVWriter, ColumnAlignment};
@@ -25,8 +31,8 @@ use whitespacesv::{WSVWriter, ColumnAlignment};
 // VecDeque and many others are accepted as well.
 // In this example, we're using mapped iterators.
 let values = vec![
-    vec!["1", "2", "3"],
-    vec!["4", "5", "6"],
+    vec!["1", "2", "3"], // In this example, each value is &str,
+    vec!["4", "5", "6"], // but String and Cow<'_, str> also work
     vec!["My string with a \n character"],
     vec!["My string with many \"\"\" characters"],
 ];
