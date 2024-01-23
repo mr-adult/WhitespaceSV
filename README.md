@@ -4,7 +4,7 @@
 
 Whitespace Separated Value (WSV) is a file format that has been designed to address to problems with the Comma Separated Value (CSV) file format. It can be parsed unambiguously and does not require any configuration for a parser to parse it.
 
-This crate provides a rust-based implementation of the [WSV standard](https://dev.stenway.com/WSV/Index.html). This implementation is as close to zero-copy as possible, only allocating memory in cases where escape characters must be replaced. There are only a handful of APIs exposed in the crate, but they should be able to handle all of your use cases.
+This crate provides a rust-based implementation of the [WSV standard](https://dev.stenway.com/WSV/Index.html). This implementation is as close to zero-copy as possible, only allocating memory in cases where escape sequences must be replaced. There are only a handful of APIs exposed in the crate, but they should be able to handle all of your use cases.
 
 
 ## Parsing
@@ -16,13 +16,17 @@ In order to parse a WSV file using this crate, simply call one of the provided p
 
 ## Writing
 
-There is only one API provided to write a WSV file. It is done as follows. This API will surround _all_ strings with quotes to avoid unnecessary scans of the content, but this is not necessary under the standard. The values in this 2D IntoIterator structure must be a type that implements 
-1. BorrowStr, 
-2. AsRef<str>, 
-3. From<&'static str>, and 
-4. ToString. 
+There is only one API provided to write a WSV file. It is done as follows. This API will surround _all_ strings with quotes to avoid unnecessary scans of the content, but this is not necessary under the standard. The values in this 2D IntoIterator structure must be Option<T>'s where T is a type that implements
+1. AsRef<str>, 
+2. From<&'static str>, and 
+3. ToString. 
 
 The &str, Cow<'_, str>, String, and &String types are all supported with these type constraints.
+
+Some examples of types that are supported via the WSVWriter::new() API:
+- LinkedList<LinkedList<Option<Cow<'_, str>>>>
+- Vec<Vec<impl Iterator<&'_ str>>>
+- Iter<Iter<Option<String>>> where Iter is any type that implements Iterator.
 
 ```rust
 use whitespacesv::{WSVWriter, ColumnAlignment};

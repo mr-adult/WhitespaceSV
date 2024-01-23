@@ -8,8 +8,8 @@ const NEWLINE: char = '\u{000A}';
 
 /// Parses the contents of a .wsv (whitespace separated value) file.
 /// The result is either a 2 dimensional vec where the outer layer is
-/// the line and the inner layer is the column. '-' values will be
-/// converted to 'None' and other values will be 'Some'
+/// the line and the inner layer is the column or a WSVError. '-' values will be
+/// converted to 'None' and all other values will be 'Some'
 ///
 /// For example, given the wsv file:
 /// ```wsv
@@ -19,12 +19,12 @@ const NEWLINE: char = '\u{000A}';
 /// the returned value would be [[Some(1), None], [Some(3), Some(4)]]
 ///
 /// The source text will be sanitized. That is to say:
-/// 1. All `"/"` escape characters within strings will be replaced with
+/// 1. All `"/"` escape sequences within quoted strings will be replaced with
 /// \n inside the string.
-/// 2. All "" (two double-quote character) escape sequences within strings
-/// will be replaced with " (one double-quote character)
-/// 3. Any wrapping quotes around a string will be removed. Ex. "hello"
-/// will just be hello in the output.
+/// 2. All `""` (two double-quote character) escape sequences within strings
+/// will be replaced with `"` (one double-quote character)
+/// 3. Any wrapping quotes around a string will be removed. Ex. `"hello world!"`
+/// will just be `hello world!` in the output.
 pub fn parse(source_text: &str) -> Result<Vec<Vec<Option<Cow<'_, str>>>>, WSVError> {
     // Just use the vec default size of 0.
     parse_with_col_count(source_text, 0)
@@ -75,19 +75,37 @@ where
     BorrowStr: AsRef<str>,
 {
     align_columns: ColumnAlignment,
-    values: OuterIter,
+    values: OuterIter::IntoIter,
+    current_inner: Option<InnerIter::IntoIter>,
+    current_value: Option<Option<BorrowStr>>,
+    num_spaces_to_yield: usize,
 }
 
 impl<OuterIter, InnerIter, BorrowStr> WSVWriter<OuterIter, InnerIter, BorrowStr>
 where
-    OuterIter: IntoIterator<Item = InnerIter>,
+    OuterIter: Iterator<Item = InnerIter>,
     InnerIter: IntoIterator<Item = Option<BorrowStr>>,
     BorrowStr: AsRef<str> + From<&'static str> + ToString,
 {
-    pub fn new(values: OuterIter) -> Self {
+    pub fn new<OuterInto>(values: OuterInto) -> Self
+        where OuterInto: IntoIterator<Item = InnerIter, IntoIter = OuterIter> {
+
+        let mut outer_into = values.into_iter();
+        let mut inner = match outer_into.next() {
+            None => None,
+            Some(inner) => Some(inner.into_iter()),
+        };
+        let value = match inner.as_mut() {
+            None => None,
+            Some(val) => val.next(), 
+        };
+
         Self {
             align_columns: ColumnAlignment::default(),
-            values: values,
+            values: outer_into,
+            current_inner: inner,
+            current_value: value,
+            num_spaces_to_yield: 0,
         }
     }
 
@@ -223,6 +241,17 @@ where
     }
 }
 
+impl<OuterIter, InnerIter, BorrowStr> Iterator for WSVWriter<OuterIter, InnerIter, BorrowStr>
+where
+    OuterIter: Iterator<Item = InnerIter>,
+    InnerIter: IntoIterator<Item = Option<BorrowStr>>,
+    BorrowStr: AsRef<str> + From<&'static str> + ToString,
+{
+    type Item = char;
+    fn next(&mut self) -> Option<Self::Item> {
+        todo!("provide lazy implementation of WSVWriter.");
+    }
+}
 #[derive(Default)]
 pub enum ColumnAlignment {
     Left,
