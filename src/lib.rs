@@ -238,6 +238,8 @@ pub struct WSVTokenizer<'wsv> {
     chars: CharIndices<'wsv>,
     peeked: Option<(usize, char)>,
     current_location: Location,
+    lookahead_error: Option<WSVError>,
+    errored: bool,
 }
 
 /// A tokenizer for the .wsv (whitespace separated value)
@@ -252,6 +254,8 @@ impl<'wsv> WSVTokenizer<'wsv> {
             chars: source_text.char_indices(),
             peeked: None,
             current_location: Location::default(),
+            lookahead_error: None,
+            errored: false,
         }
     }
 
@@ -263,32 +267,29 @@ impl<'wsv> WSVTokenizer<'wsv> {
         let mut chunk_start = None;
         loop {
             if self.match_char('"').is_some() {
-                let mut end_location = match self.peek_location() {
-                    None => self.source.len(),
-                    Some(pos) => pos.byte_index,
-                };
-
                 if self.match_char('"').is_some() {
-                    // a quote is ascii, so subtracting 2 bytes should always be safe.
-                    end_location -= 2;
+                    // a quote is ascii, so subtracting 1 bytes should always be safe.
+                    let end_location = self.current_location.byte_index - 1;
                     chunks.push(&self.source[chunk_start.unwrap_or(end_location)..end_location]);
-                    chunks.push("\"");
+                    chunk_start = Some(self.current_location.byte_index);
                 } else if self.match_char('/').is_some() {
                     if self.match_char('"').is_none() {
+                        self.errored = true;
                         return Some(Err(WSVError {
                             err_type: WSVErrorType::InvalidStringLineBreak,
                             location: self.current_location.clone(),
                         }));
                     }
-                    chunks.push("\n")
+                    chunks.push("\n");
+                    chunk_start = Some(self.current_location.byte_index);
                 } else {
                     // a quote is ascii, so subtracting 1 bytes should always be safe.
-                    end_location -= 1;
-                    chunks.push(&self.source[chunk_start.unwrap_or(end_location)..end_location]);
+                    chunks.push(&self.source[chunk_start.unwrap_or(self.current_location.byte_index)..self.current_location.byte_index]);
                     break;
                 }
             } else if let Some(NEWLINE) = self.peek() {
                 if let Some(NEWLINE) = self.peek() {
+                    self.errored = true;
                     return Some(Err(WSVError {
                         err_type: WSVErrorType::StringNotClosed,
                         location: self
@@ -419,29 +420,22 @@ impl<'wsv> Iterator for WSVTokenizer<'wsv> {
     type Item = Result<WSVToken<'wsv>, WSVError>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.current_location.col != 0 {
-            if let Some(ch) = self.peek() {
-                if ch == '"' {
-                    return Some(Err(WSVError {
-                        err_type: WSVErrorType::InvalidDoubleQuoteAfterValue,
-                        location: self
-                            .peek_location()
-                            .expect("BUG: peek_location() return Some()"),
-                    }));
-                } else if ch != NEWLINE && !Self::is_whitespace(ch) {
-                    return Some(Err(WSVError {
-                        err_type: WSVErrorType::InvalidCharacterAfterString,
-                        location: self
-                            .peek_location()
-                            .expect("BUG: peek_location() return Some()"),
-                    }));
-                }
-            }
+        if self.errored { return None; }
+        if let Some(err) = take(&mut self.lookahead_error) {
+            self.errored = true;
+            return Some(Err(err));
         }
         self.match_char_while(|ch| Self::is_whitespace(ch));
 
         let str = self.match_string();
         if str.is_some() {
+            let lookahead = self.peek().unwrap_or(' ');
+            if lookahead != '#' && !Self::is_whitespace(lookahead) {
+                self.lookahead_error = Some(WSVError {
+                    location: self.current_location.clone(),
+                    err_type: WSVErrorType::InvalidCharacterAfterString,
+                });
+            }
             return str;
         } else if self.match_char('#').is_some() {
             // Comment
@@ -470,6 +464,12 @@ impl<'wsv> Iterator for WSVTokenizer<'wsv> {
                 Some(str) => {
                     if str == "-" {
                         return Some(Ok(WSVToken::Null));
+                    }
+                    if let Some('"') = self.peek() {
+                        self.lookahead_error = Some(WSVError {
+                            location: self.current_location.clone(),
+                            err_type: WSVErrorType::InvalidDoubleQuoteAfterValue,
+                        });
                     }
                     return Some(Ok(WSVToken::Value(Cow::Borrowed(str))));
                 }
@@ -505,7 +505,7 @@ impl WSVError {
 
 /// For details on these error types, see the Parser Errors
 /// section of [https://dev.stenway.com/WSV/Specification.html](https://dev.stenway.com/WSV/Specification.html)
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WSVErrorType {
     StringNotClosed,
     InvalidDoubleQuoteAfterValue,
@@ -537,6 +537,8 @@ impl Location {
 
 #[cfg(debug_assertions)]
 mod tests {
+    use crate::{WSVTokenizer, WSVToken, WSVError, WSVErrorType};
+
     use super::{parse, WSVWriter};
     use std::{borrow::Cow, fmt::write};
 
@@ -686,7 +688,7 @@ mod tests {
     }
 
     #[test]
-    fn readme_example() {
+    fn readme_example_write() {
         use crate::{ColumnAlignment, WSVWriter};
         // Build up the testing value set. This API accepts any
         // type that implements IntoIterator, so LinkedList,
@@ -732,5 +734,101 @@ mod tests {
             .to_string();
 
         println!("{}", output);
+    }
+
+    #[test]
+    fn tokenizes_strings_correctly() {
+        let input = "\"this is a string\"";
+        let mut tokenizer = WSVTokenizer::new(input);
+        assert!(are_equal(Ok(WSVToken::Value(Cow::Borrowed("this is a string"))), tokenizer.next().unwrap()));
+        assert!(tokenizer.next().is_none());
+    }
+
+    #[test]
+    fn tokenizes_string_and_immediate_comment_correctly() {
+        let input = "somekindofvalue#thenacomment";
+        let mut tokenizer = WSVTokenizer::new(input);
+        assert!(are_equal(Ok(WSVToken::Value(Cow::Borrowed("somekindofvalue"))), tokenizer.next().unwrap()));
+        assert!(are_equal(Ok(WSVToken::Comment("thenacomment")), tokenizer.next().unwrap()));
+    }
+
+    #[test]
+    fn catches_invalid_line_breaks() {
+        let input = "\"this is a string with an invalid \"/ line break.\"";
+        let mut tokenizer = WSVTokenizer::new(input);
+        if let Err(err) = tokenizer.next().unwrap() {
+            if let WSVErrorType::InvalidStringLineBreak = err.err_type() {
+                assert!(tokenizer.next().is_none());
+                return;
+            }
+        }
+        panic!("Expected to find an InvalidStringLineBreak error");
+    }
+
+    #[test]
+    fn doesnt_err_on_false_positive_line_breaks() {
+        let input = "\"string \"\"/\"";
+        let mut tokenizer = WSVTokenizer::new(input);
+        let token = tokenizer.next().unwrap();
+        println!("{:?}", token);
+        assert!(are_equal(Ok(WSVToken::Value(Cow::Owned("string \"/".to_string()))), token));
+        assert!(tokenizer.next().is_none());
+    }
+
+    #[test]
+    fn escapes_quotes_correctly() {
+        let input = "\"\"\"\"\"\"\"\"";
+        let mut tokenizer = WSVTokenizer::new(input);
+        assert!(are_equal(Ok(WSVToken::Value(Cow::Owned("\"\"\"".to_string()))), tokenizer.next().unwrap()));
+        assert!(tokenizer.next().is_none());
+    }
+
+    #[test]
+    fn parses_quoted_string_and_immediate_comment_correctly() {
+        let input = "\"somekindofvalue\"#thenacomment";
+        let mut tokenizer = WSVTokenizer::new(input);
+        assert!(are_equal(Ok(WSVToken::Value(Cow::Borrowed("somekindofvalue"))), tokenizer.next().unwrap()));
+        assert!(are_equal(Ok(WSVToken::Comment("thenacomment")), tokenizer.next().unwrap()));
+    }
+
+    #[allow(dead_code)]
+    fn are_equal(first: Result<WSVToken, WSVError>, second: Result<WSVToken, WSVError>) -> bool {
+        match first {
+            Ok(WSVToken::LF) => {
+                if let Ok(WSVToken::LF) = second {
+                    return true;
+                } else {
+                    return false;
+                }
+            }
+            Ok(WSVToken::Null) => {
+                if let Ok(WSVToken::Null) = second {
+                    return true;
+                } else {
+                    return false;
+                }
+            }
+            Ok(WSVToken::Comment(str1)) => {
+                if let Ok(WSVToken::Comment(str2)) = second {
+                    return str1 == str2;
+                } else {
+                    return false;
+                }
+            }
+            Ok(WSVToken::Value(value1)) => {
+                if let Ok(WSVToken::Value(value2)) = second {
+                    return value1.as_ref() == value2.as_ref();
+                } else {
+                    return false;
+                }
+            }
+            Err(err1) => {
+                if let Err(err2) = second {
+                    return err1.err_type() == err2.err_type()                
+                } else {
+                    return false;
+                }
+            }
+        }
     }
 }
