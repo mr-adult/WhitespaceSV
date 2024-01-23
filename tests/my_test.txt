@@ -1,0 +1,4 @@
+This file is me having -a lot of fun with#
+the WSV spec. "I am #trying "/""" to break#everything"
+that " could"" be broken"" with"#a parser.""
+Is this a line break? - "/" "or is this?"/""

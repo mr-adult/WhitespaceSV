@@ -158,7 +158,7 @@ where
                     None => {
                         is_none = true;
                         "-"
-                    },
+                    }
                     Some(string) => {
                         is_none = false;
                         string.as_ref()
@@ -181,9 +181,7 @@ where
                         }
                         match col {
                             None => value_string.push('-'),
-                            Some(borrow) => {
-                                value_string.push_str(borrow.as_ref())
-                            } 
+                            Some(borrow) => value_string.push_str(borrow.as_ref()),
                         }
                         Cow::Owned(value_string)
                     }
@@ -280,11 +278,16 @@ impl<'wsv> WSVTokenizer<'wsv> {
                             location: self.current_location.clone(),
                         }));
                     }
+                    let end_index = self.current_location.byte_index - 2;
+                    chunks.push(&self.source[chunk_start.unwrap_or(end_index)..end_index]);
                     chunks.push("\n");
-                    chunk_start = Some(self.current_location.byte_index);
+                    chunk_start = Some(self.current_location.byte_index + 1);
                 } else {
                     // a quote is ascii, so subtracting 1 bytes should always be safe.
-                    chunks.push(&self.source[chunk_start.unwrap_or(self.current_location.byte_index)..self.current_location.byte_index]);
+                    chunks.push(
+                        &self.source[chunk_start.unwrap_or(self.current_location.byte_index)
+                            ..self.current_location.byte_index],
+                    );
                     break;
                 }
             } else if let Some(NEWLINE) = self.peek() {
@@ -302,8 +305,20 @@ impl<'wsv> WSVTokenizer<'wsv> {
                     None => self.source.len(),
                     Some(val) => val.byte_index,
                 });
-            } else {
-                self.match_char_if(&mut |_| true);
+            } else if self.match_char_if(&mut |_| true).is_none() {
+                return Some(Err(WSVError {
+                    err_type: WSVErrorType::StringNotClosed,
+                    location: self
+                        .peek_location()
+                        .into_iter()
+                        .next()
+                        .unwrap_or_else(|| {
+                            let mut loc = self.current_location.clone();
+                            loc.byte_index = self.source.len();
+                            loc.col += 1;
+                            return loc;
+                        }),
+                }));
             }
         }
 
@@ -420,7 +435,9 @@ impl<'wsv> Iterator for WSVTokenizer<'wsv> {
     type Item = Result<WSVToken<'wsv>, WSVError>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.errored { return None; }
+        if self.errored {
+            return None;
+        }
         if let Some(err) = take(&mut self.lookahead_error) {
             self.errored = true;
             return Some(Err(err));
@@ -430,7 +447,7 @@ impl<'wsv> Iterator for WSVTokenizer<'wsv> {
         let str = self.match_string();
         if str.is_some() {
             let lookahead = self.peek().unwrap_or(' ');
-            if lookahead != '#' && !Self::is_whitespace(lookahead) {
+            if lookahead != NEWLINE && lookahead != '#' && !Self::is_whitespace(lookahead) {
                 self.lookahead_error = Some(WSVError {
                     location: self.current_location.clone(),
                     err_type: WSVErrorType::InvalidCharacterAfterString,
@@ -537,7 +554,7 @@ impl Location {
 
 #[cfg(debug_assertions)]
 mod tests {
-    use crate::{WSVTokenizer, WSVToken, WSVError, WSVErrorType};
+    use crate::{WSVError, WSVErrorType, WSVToken, WSVTokenizer};
 
     use super::{parse, WSVWriter};
     use std::{borrow::Cow, fmt::write};
@@ -717,7 +734,7 @@ mod tests {
     fn in_and_out_with_cows() {
         let str = include_str!("../tests/1_stenway.com");
 
-        let values = parse(str).unwrap();
+        let values = parse(str).unwrap_or_else(|err| panic!("{:?}", err));
         let output = WSVWriter::new(values)
             .align_columns(crate::ColumnAlignment::Right)
             .to_string();
@@ -740,7 +757,10 @@ mod tests {
     fn tokenizes_strings_correctly() {
         let input = "\"this is a string\"";
         let mut tokenizer = WSVTokenizer::new(input);
-        assert!(are_equal(Ok(WSVToken::Value(Cow::Borrowed("this is a string"))), tokenizer.next().unwrap()));
+        assert!(are_equal(
+            Ok(WSVToken::Value(Cow::Borrowed("this is a string"))),
+            tokenizer.next().unwrap()
+        ));
         assert!(tokenizer.next().is_none());
     }
 
@@ -748,8 +768,14 @@ mod tests {
     fn tokenizes_string_and_immediate_comment_correctly() {
         let input = "somekindofvalue#thenacomment";
         let mut tokenizer = WSVTokenizer::new(input);
-        assert!(are_equal(Ok(WSVToken::Value(Cow::Borrowed("somekindofvalue"))), tokenizer.next().unwrap()));
-        assert!(are_equal(Ok(WSVToken::Comment("thenacomment")), tokenizer.next().unwrap()));
+        assert!(are_equal(
+            Ok(WSVToken::Value(Cow::Borrowed("somekindofvalue"))),
+            tokenizer.next().unwrap()
+        ));
+        assert!(are_equal(
+            Ok(WSVToken::Comment("thenacomment")),
+            tokenizer.next().unwrap()
+        ));
     }
 
     #[test]
@@ -771,7 +797,10 @@ mod tests {
         let mut tokenizer = WSVTokenizer::new(input);
         let token = tokenizer.next().unwrap();
         println!("{:?}", token);
-        assert!(are_equal(Ok(WSVToken::Value(Cow::Owned("string \"/".to_string()))), token));
+        assert!(are_equal(
+            Ok(WSVToken::Value(Cow::Owned("string \"/".to_string()))),
+            token
+        ));
         assert!(tokenizer.next().is_none());
     }
 
@@ -779,16 +808,54 @@ mod tests {
     fn escapes_quotes_correctly() {
         let input = "\"\"\"\"\"\"\"\"";
         let mut tokenizer = WSVTokenizer::new(input);
-        assert!(are_equal(Ok(WSVToken::Value(Cow::Owned("\"\"\"".to_string()))), tokenizer.next().unwrap()));
+        assert!(are_equal(
+            Ok(WSVToken::Value(Cow::Owned("\"\"\"".to_string()))),
+            tokenizer.next().unwrap()
+        ));
         assert!(tokenizer.next().is_none());
+    }
+
+    #[test]
+    fn escapes_new_lines_correctly() {
+        let input = "\"\"/\"\"/\"\"/\"\"";
+        let mut tokenizer = WSVTokenizer::new(input);
+        let token = tokenizer.next().unwrap();
+        println!("{:?}", token);
+        assert!(are_equal(Ok(WSVToken::Value(Cow::Owned("\n\n\n".to_string()))), token));
     }
 
     #[test]
     fn parses_quoted_string_and_immediate_comment_correctly() {
         let input = "\"somekindofvalue\"#thenacomment";
         let mut tokenizer = WSVTokenizer::new(input);
-        assert!(are_equal(Ok(WSVToken::Value(Cow::Borrowed("somekindofvalue"))), tokenizer.next().unwrap()));
-        assert!(are_equal(Ok(WSVToken::Comment("thenacomment")), tokenizer.next().unwrap()));
+        assert!(are_equal(
+            Ok(WSVToken::Value(Cow::Borrowed("somekindofvalue"))),
+            tokenizer.next().unwrap()
+        ));
+        assert!(are_equal(
+            Ok(WSVToken::Comment("thenacomment")),
+            tokenizer.next().unwrap()
+        ));
+    }
+
+    #[test]
+    fn catches_unclosed_string() {
+        let input = "\"this is an unclosed string";
+        let mut tokenizer = WSVTokenizer::new(input);
+        assert!(are_equal(
+            Err(WSVError {
+                location: crate::Location::default(),
+                err_type: WSVErrorType::StringNotClosed
+            }),
+            tokenizer.next().unwrap()
+        ));
+        assert!(tokenizer.next().is_none());
+    }
+
+    #[test]
+    fn atrocious_wsv() {
+        let result = parse(include_str!("../tests/my_test.txt"));
+        println!("{:?}", result.unwrap());
     }
 
     #[allow(dead_code)]
@@ -824,7 +891,7 @@ mod tests {
             }
             Err(err1) => {
                 if let Err(err2) = second {
-                    return err1.err_type() == err2.err_type()                
+                    return err1.err_type() == err2.err_type();
                 } else {
                     return false;
                 }
