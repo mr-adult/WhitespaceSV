@@ -177,37 +177,15 @@ where
                     }
                 };
 
-                let str_to_push: Cow<'_, str> = match alignment {
-                    ColumnAlignment::Packed => panic!("BUG: to_string_inner should not be called when using ColumnAlignment::Packed"),
-                    ColumnAlignment::Left => {
-                        let mut value_string = value.to_string();
-                        for _ in value.len()..max_col_widths[i] {
-                            value_string.push(' ');
-                        }
-                        Cow::Owned(value_string)
-                    }
-                    ColumnAlignment::Right => {
-                        let mut value_string = "".to_string();
-                        for _ in value.len()..=max_col_widths[i] {
-                            value_string.push(' ');
-                        }
-                        match col {
-                            None => value_string.push('-'),
-                            Some(borrow) => value_string.push_str(borrow.as_ref()),
-                        }
-                        Cow::Owned(value_string)
-                    }
-                };
-
-                if !is_none {
-                    result.push('"');
-                } else {
-                    if let ColumnAlignment::Right = alignment {
-                        result.push(' ');
+                if let &ColumnAlignment::Right = &alignment {
+                    for _ in value.len()..max_col_widths[i] {
                         result.push(' ');
                     }
                 }
-                for ch in str_to_push.chars() {
+                if !is_none {
+                    result.push('"');
+                }
+                for ch in value.chars() {
                     if ch == '\n' {
                         result.push('"');
                         result.push('/');
@@ -221,9 +199,9 @@ where
                 }
                 if !is_none {
                     result.push('"');
-                } else {
-                    if let ColumnAlignment::Left = alignment {
-                        result.push(' ');
+                }
+                if let &ColumnAlignment::Left = &alignment {
+                    for _ in value.len()..max_col_widths[i] {
                         result.push(' ');
                     }
                 }
