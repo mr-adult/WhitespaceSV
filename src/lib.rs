@@ -144,72 +144,64 @@ where
                         }
                     }
                 }
+                let mut result = String::new();
+                for line in vecs {
+                    for (i, col) in line.into_iter().enumerate() {
+                        if i != 0 {
+                            result.push(' ');
+                        }
 
-                Self::to_string_inner(vecs, self.align_columns, max_col_widths)
+                        let is_none;
+                        let value = match col.as_ref() {
+                            None => {
+                                is_none = true;
+                                "-"
+                            }
+                            Some(string) => {
+                                is_none = false;
+                                string.as_ref()
+                            }
+                        };
+
+                        if let &ColumnAlignment::Right = &self.align_columns {
+                            for _ in value.len()..max_col_widths[i] {
+                                result.push(' ');
+                            }
+                        }
+                        if !is_none {
+                            result.push('"');
+                        } else {
+                            result.push(' ');
+                        }
+                        for ch in value.chars() {
+                            if ch == '\n' {
+                                result.push('"');
+                                result.push('/');
+                                result.push('"');
+                            } else if ch == '"' {
+                                result.push('"');
+                                result.push('"');
+                            } else {
+                                result.push(ch);
+                            }
+                        }
+                        if !is_none {
+                            result.push('"');
+                        } else {
+                            result.push(' ');
+                        }
+                        if let &ColumnAlignment::Left = &self.align_columns {
+                            for _ in value.len()..max_col_widths[i] + if is_none { 2 } else { 0 } {
+                                result.push(' ');
+                            }
+                        }
+                    }
+                    result.push('\n')
+                }
+
+                result
             }
         }
-    }
-
-    fn to_string_inner<
-        Outer: IntoIterator<Item = Inner>,
-        Inner: IntoIterator<Item = Option<BorrowStr>>,
-    >(
-        iters: Outer,
-        alignment: ColumnAlignment,
-        max_col_widths: Vec<usize>,
-    ) -> String {
-        let mut result = String::new();
-        for line in iters {
-            for (i, col) in line.into_iter().enumerate() {
-                if i != 0 {
-                    result.push(' ');
-                }
-
-                let is_none;
-                let value = match col.as_ref() {
-                    None => {
-                        is_none = true;
-                        "-"
-                    }
-                    Some(string) => {
-                        is_none = false;
-                        string.as_ref()
-                    }
-                };
-
-                if let &ColumnAlignment::Right = &alignment {
-                    for _ in value.len()..max_col_widths[i] {
-                        result.push(' ');
-                    }
-                }
-                if !is_none {
-                    result.push('"');
-                }
-                for ch in value.chars() {
-                    if ch == '\n' {
-                        result.push('"');
-                        result.push('/');
-                        result.push('"');
-                    } else if ch == '"' {
-                        result.push('"');
-                        result.push('"');
-                    } else {
-                        result.push(ch);
-                    }
-                }
-                if !is_none {
-                    result.push('"');
-                }
-                if let &ColumnAlignment::Left = &alignment {
-                    for _ in value.len()..max_col_widths[i] {
-                        result.push(' ');
-                    }
-                }
-            }
-            result.push('\n')
-        }
-
-        result
     }
 }
 
@@ -264,7 +256,7 @@ where
                 None => return None,
                 Some(inner) => {
                     self.current_inner = Some(inner.into_iter());
-                    return Some('\n')
+                    return Some('\n');
                 }
             }
         }
