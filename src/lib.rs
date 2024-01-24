@@ -1,6 +1,7 @@
 #![doc = include_str!("../README.md")]
 
 use std::borrow::Cow;
+use std::collections::VecDeque;
 use std::mem::take;
 use std::str::CharIndices;
 
@@ -77,8 +78,7 @@ where
     align_columns: ColumnAlignment,
     values: OuterIter::IntoIter,
     current_inner: Option<InnerIter::IntoIter>,
-    current_value: Option<Option<BorrowStr>>,
-    num_spaces_to_yield: usize,
+    lookahead_chars: VecDeque<char>,
 }
 
 impl<OuterIter, InnerIter, BorrowStr> WSVWriter<OuterIter, InnerIter, BorrowStr>
@@ -88,24 +88,16 @@ where
     BorrowStr: AsRef<str> + From<&'static str> + ToString,
 {
     pub fn new<OuterInto>(values: OuterInto) -> Self
-        where OuterInto: IntoIterator<Item = InnerIter, IntoIter = OuterIter> {
-
-        let mut outer_into = values.into_iter();
-        let mut inner = match outer_into.next() {
-            None => None,
-            Some(inner) => Some(inner.into_iter()),
-        };
-        let value = match inner.as_mut() {
-            None => None,
-            Some(val) => val.next(), 
-        };
+    where
+        OuterInto: IntoIterator<Item = InnerIter, IntoIter = OuterIter>,
+    {
+        let outer_into = values.into_iter();
 
         Self {
             align_columns: ColumnAlignment::default(),
             values: outer_into,
-            current_inner: inner,
-            current_value: value,
-            num_spaces_to_yield: 0,
+            current_inner: None,
+            lookahead_chars: VecDeque::new(),
         }
     }
 
@@ -116,10 +108,10 @@ where
 
     pub fn to_string(self) -> String {
         match self.align_columns {
+            ColumnAlignment::Packed => self.collect::<String>(),
             ColumnAlignment::Left | ColumnAlignment::Right => {
                 let vecs = self
                     .values
-                    .into_iter()
                     .map(|inner| inner.into_iter().collect::<Vec<Option<BorrowStr>>>())
                     .collect::<Vec<Vec<Option<BorrowStr>>>>();
 
@@ -148,10 +140,7 @@ where
                     }
                 }
 
-                Self::to_string_inner(vecs, self.align_columns, Some(max_col_widths))
-            }
-            ColumnAlignment::Packed => {
-                Self::to_string_inner(self.values, ColumnAlignment::Packed, None)
+                Self::to_string_inner(vecs, self.align_columns, max_col_widths)
             }
         }
     }
@@ -162,13 +151,13 @@ where
     >(
         iters: Outer,
         alignment: ColumnAlignment,
-        max_col_widths: Option<Vec<usize>>,
+        max_col_widths: Vec<usize>,
     ) -> String {
         let mut result = String::new();
         for line in iters {
             for (i, col) in line.into_iter().enumerate() {
                 if i != 0 {
-                    result.push_str(" ");
+                    result.push(' ');
                 }
 
                 let is_none;
@@ -184,17 +173,17 @@ where
                 };
 
                 let str_to_push: Cow<'_, str> = match alignment {
-                    ColumnAlignment::Packed => Cow::Borrowed(&value),
+                    ColumnAlignment::Packed => panic!("BUG: to_string_inner should not be called when using ColumnAlignment::Packed"),
                     ColumnAlignment::Left => {
                         let mut value_string = value.to_string();
-                        for _ in value.len()..max_col_widths.as_ref().unwrap()[i] {
+                        for _ in value.len()..max_col_widths[i] {
                             value_string.push(' ');
                         }
                         Cow::Owned(value_string)
                     }
                     ColumnAlignment::Right => {
                         let mut value_string = "".to_string();
-                        for _ in value.len()..=max_col_widths.as_ref().unwrap()[i] {
+                        for _ in value.len()..=max_col_widths[i] {
                             value_string.push(' ');
                         }
                         match col {
@@ -249,7 +238,53 @@ where
 {
     type Item = char;
     fn next(&mut self) -> Option<Self::Item> {
-        todo!("provide lazy implementation of WSVWriter.");
+        loop {
+            if let Some(ch) = self.lookahead_chars.pop_front() {
+                return Some(ch);
+            }
+
+            if let Some(inner_mut) = self.current_inner.as_mut() {
+                match inner_mut.next() {
+                    None => {
+                        self.current_inner = None;
+                    }
+                    Some(next_string_like) => match next_string_like {
+                        None => {
+                            self.lookahead_chars.push_back(' ');
+                            return Some('-');
+                        }
+                        Some(string_like) => {
+                            self.lookahead_chars.push_back('"');
+                            for ch in string_like.as_ref().chars() {
+                                match ch {
+                                    '\n' => {
+                                        self.lookahead_chars.push_back('"');
+                                        self.lookahead_chars.push_back('/');
+                                        self.lookahead_chars.push_back('"');
+                                    }
+                                    '"' => {
+                                        self.lookahead_chars.push_back('"');
+                                        self.lookahead_chars.push_back('"');
+                                    }
+                                    ch => self.lookahead_chars.push_back(ch),
+                                }
+                            }
+                            self.lookahead_chars.push_back('"');
+                            self.lookahead_chars.push_back(' ');
+                            continue;
+                        }
+                    },
+                }
+            }
+
+            match self.values.next() {
+                None => return None,
+                Some(inner) => {
+                    self.current_inner = Some(inner.into_iter());
+                    return Some('\n')
+                }
+            }
+        }
     }
 }
 #[derive(Default)]
@@ -337,16 +372,12 @@ impl<'wsv> WSVTokenizer<'wsv> {
             } else if self.match_char_if(&mut |_| true).is_none() {
                 return Some(Err(WSVError {
                     err_type: WSVErrorType::StringNotClosed,
-                    location: self
-                        .peek_location()
-                        .into_iter()
-                        .next()
-                        .unwrap_or_else(|| {
-                            let mut loc = self.current_location.clone();
-                            loc.byte_index = self.source.len();
-                            loc.col += 1;
-                            return loc;
-                        }),
+                    location: self.peek_location().into_iter().next().unwrap_or_else(|| {
+                        let mut loc = self.current_location.clone();
+                        loc.byte_index = self.source.len();
+                        loc.col += 1;
+                        return loc;
+                    }),
                 }));
             }
         }
@@ -850,7 +881,10 @@ mod tests {
         let mut tokenizer = WSVTokenizer::new(input);
         let token = tokenizer.next().unwrap();
         println!("{:?}", token);
-        assert!(are_equal(Ok(WSVToken::Value(Cow::Owned("\n\n\n".to_string()))), token));
+        assert!(are_equal(
+            Ok(WSVToken::Value(Cow::Owned("\n\n\n".to_string()))),
+            token
+        ));
     }
 
     #[test]
