@@ -936,4 +936,14 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn write_really_large_file() {
+        let values = (0..u32::MAX).map(|_| (0..10).into_iter().map(|val| Some(val.to_string())));
+        for ch in WSVWriter::new(values) {
+            print!("{}", ch);
+            // This is so my computer doesn't fry when running unit tests.
+            break;
+        }
+    }
 }

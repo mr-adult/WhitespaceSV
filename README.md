@@ -16,7 +16,13 @@ In order to parse a WSV file using this crate, simply call one of the provided p
 
 ## Writing
 
-There is only one API provided to write a WSV file. It is done as follows. This API will surround _all_ strings with quotes to avoid unnecessary scans of the content, but this is not necessary under the standard. The values in this 2D IntoIterator structure must be Option<T>'s where T is a type that implements
+There are two ways to use the API provided to write a WSV file. 
+1. The WSVWriter to_string() method - this allows you to align your columns to the left or right as you please. Most use cases should use this.
+2. The WSVWriter Iterator implementation. This allows you to lazily evaluate values. If you need to write value stores that are too large to fit in memory, use this. This implementation does not respect column alignment and is built for pure speed.
+
+### to_string()
+
+This API will surround _all_ strings with quotes to avoid unnecessary scans of the content, but this is not necessary under the standard. The values in this 2D IntoIterator structure must be Option<T>'s where T is a type that implements
 1. AsRef<str>, 
 2. From<&'static str>, and 
 3. ToString. 
@@ -59,4 +65,20 @@ let wsv = WSVWriter::new(values_as_opts)
 /// "My string with a "/" character"
 /// "My string with many """""" characters"
 println!("{}", wsv);
+```
+
+### Iterator
+
+This implementation of the WSVWriter allows you to write incredibly large files by taking advantage of the lazy evaluation of iterators. By passing iterators into the WSVWriter and using the Iterator implementation that WSVWriter provides, you can write as big of files as you can fit on disk space. As an example, let's say I need to print 4,294,967,295 rows of the sequence 0 through 9 to my terminal in the WSV format. I can accomplish this by using the code as follows:
+
+```rust
+use whitespacesv::WSVWriter;
+
+let values = (0..u32::MAX).map(|_| (0..10).into_iter().map(|val| Some(val.to_string())));
+// NOTE: column alignment is not respected when using this iterator implementation.
+for ch in WSVWriter::new(values) {
+    print!("{}", ch);
+    // This is so that my computer doesn't fry when running unit tests.
+    break;
+}
 ```
