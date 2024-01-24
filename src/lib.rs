@@ -123,8 +123,13 @@ where
                         match col {
                             None => col_len = 1,
                             Some(col) => {
-                                for _ in col.as_ref().chars() {
-                                    col_len += 1;
+                                for ch in col.as_ref().chars() {
+                                    match ch {
+                                        // account for escape sequences.
+                                        '\n' => col_len += 3,
+                                        '"' => col_len += 2,
+                                        _ => col_len += 1,
+                                    }
                                 }
                             }
                         }
