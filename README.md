@@ -22,7 +22,7 @@ There are two ways to use the API provided to write a WSV file.
 
 ### to_string()
 
-This API will surround _all_ strings with quotes to avoid unnecessary scans of the content, but this is not necessary under the standard. The values in this 2D IntoIterator structure must be Option<T>'s where T is a type that implements
+This API will surround strings with quotes _only if necessary_. The values in this 2D IntoIterator structure must be Options where the inner value is a type that implements
 1. AsRef<str>, 
 2. From<&'static str>, and 
 3. ToString. 
@@ -56,13 +56,13 @@ let wsv = WSVWriter::new(values_as_opts)
     // right aligned are also options in cases where 
     // your .wsv file will be looked at by people and 
     // not just machines.
-    .align_columns(ColumnAlignment::Packed)
+    .align_columns(ColumnAlignment::Left)
     .to_string();
 
 /// Output:
-/// "1" "2" "3"
-/// "4" "5" "6"
-/// "My string with a "/" character"
+/// 1                                       2 3
+/// 4                                       5 6
+/// "My string with a "/" character"       
 /// "My string with many """""" characters"
 println!("{}", wsv);
 ```

@@ -110,40 +110,64 @@ where
         match self.align_columns {
             ColumnAlignment::Packed => self.collect::<String>(),
             ColumnAlignment::Left | ColumnAlignment::Right => {
+                let mut max_col_widths = Vec::new();
+
                 let vecs = self
                     .values
-                    .map(|inner| inner.into_iter().collect::<Vec<Option<BorrowStr>>>())
-                    .collect::<Vec<Vec<Option<BorrowStr>>>>();
-
-                let mut max_col_widths = Vec::new();
-                for line in vecs.iter() {
-                    for (i, col) in line.iter().enumerate() {
-                        let mut col_len = 0;
-
-                        match col {
-                            None => col_len = 1,
-                            Some(col) => {
-                                for ch in col.as_ref().chars() {
-                                    match ch {
-                                        // account for escape sequences.
-                                        '\n' => col_len += 3,
-                                        '"' => col_len += 2,
-                                        _ => col_len += 1,
+                    .map(|inner| {
+                        inner
+                            .into_iter()
+                            .enumerate()
+                            .map(|(index, value)| {
+                                // Figure out 2 things while consuming the iterators:
+                                // 1. Whether or not the value needs quotes
+                                // 2. The length of the string we will be writing
+                                let mut needs_quotes = false;
+                                let mut value_len = 0;
+                                match value.as_ref() {
+                                    None => value_len = 1,
+                                    Some(val) => {
+                                        for ch in val.as_ref().chars() {
+                                            match ch {
+                                                // account for escape sequences.
+                                                '\n' => {
+                                                    value_len += 3;
+                                                    needs_quotes = true;
+                                                }
+                                                '"' => {
+                                                    value_len += 2;
+                                                    needs_quotes = true;
+                                                }
+                                                '#' => {
+                                                    value_len += 1;
+                                                    needs_quotes = true;
+                                                }
+                                                ch => {
+                                                    value_len += 1;
+                                                    needs_quotes |= ch == '#'
+                                                        || WSVTokenizer::is_whitespace(ch);
+                                                }
+                                            }
+                                        }
+                                        if needs_quotes {
+                                            value_len += 2;
+                                        }
+                                        match max_col_widths.get_mut(index) {
+                                            None => max_col_widths.push(value_len),
+                                            Some(longest_len) => {
+                                                if value_len > *longest_len {
+                                                    *longest_len = value_len
+                                                }
+                                            }
+                                        }
                                     }
                                 }
-                            }
-                        }
+                                return (needs_quotes, value_len, value);
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .collect::<Vec<_>>();
 
-                        match max_col_widths.get_mut(i) {
-                            None => max_col_widths.push(col_len),
-                            Some(max) => {
-                                if *max < col_len {
-                                    *max = col_len
-                                }
-                            }
-                        }
-                    }
-                }
                 let mut result = String::new();
                 for line in vecs {
                     for (i, col) in line.into_iter().enumerate() {
@@ -151,28 +175,21 @@ where
                             result.push(' ');
                         }
 
-                        let is_none;
-                        let value = match col.as_ref() {
-                            None => {
-                                is_none = true;
-                                "-"
-                            }
-                            Some(string) => {
-                                is_none = false;
-                                string.as_ref()
-                            }
+                        let value = match col.2.as_ref() {
+                            None => "-",
+                            Some(string) => string.as_ref(),
                         };
 
                         if let &ColumnAlignment::Right = &self.align_columns {
-                            for _ in value.len()..max_col_widths[i] {
+                            for _ in col.1..max_col_widths[i] {
                                 result.push(' ');
                             }
                         }
-                        if !is_none {
+
+                        if col.0 {
                             result.push('"');
-                        } else {
-                            result.push(' ');
                         }
+
                         for ch in value.chars() {
                             if ch == '\n' {
                                 result.push('"');
@@ -185,13 +202,13 @@ where
                                 result.push(ch);
                             }
                         }
-                        if !is_none {
+
+                        if col.0 {
                             result.push('"');
-                        } else {
-                            result.push(' ');
                         }
+
                         if let &ColumnAlignment::Left = &self.align_columns {
-                            for _ in value.len()..max_col_widths[i] + if is_none { 2 } else { 0 } {
+                            for _ in col.1..max_col_widths[i] {
                                 result.push(' ');
                             }
                         }
@@ -229,22 +246,30 @@ where
                             return Some('-');
                         }
                         Some(string_like) => {
-                            self.lookahead_chars.push_back('"');
+                            let mut needs_quotes = false;
                             for ch in string_like.as_ref().chars() {
                                 match ch {
                                     '\n' => {
                                         self.lookahead_chars.push_back('"');
                                         self.lookahead_chars.push_back('/');
                                         self.lookahead_chars.push_back('"');
+                                        needs_quotes = true;
                                     }
                                     '"' => {
                                         self.lookahead_chars.push_back('"');
                                         self.lookahead_chars.push_back('"');
+                                        needs_quotes = true;
                                     }
-                                    ch => self.lookahead_chars.push_back(ch),
+                                    ch => {
+                                        self.lookahead_chars.push_back(ch);
+                                        needs_quotes |= ch == '#' || WSVTokenizer::is_whitespace(ch);
+                                    },
                                 }
                             }
-                            self.lookahead_chars.push_back('"');
+                            if needs_quotes {
+                                self.lookahead_chars.push_front('"');
+                                self.lookahead_chars.push_back('"');
+                            }
                             self.lookahead_chars.push_back(' ');
                             continue;
                         }
@@ -759,7 +784,7 @@ mod tests {
         let wsv = WSVWriter::new(values_as_opts)
             // The default is packed, but left and right are also options
             // if your .wsv file will be looked at by people
-            .align_columns(ColumnAlignment::Packed)
+            .align_columns(ColumnAlignment::Left)
             .to_string();
 
         println!("{}", wsv);
