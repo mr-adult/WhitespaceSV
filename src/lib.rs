@@ -385,6 +385,10 @@ pub enum ColumnAlignment {
     Packed,
 }
 
+/// A tokenizer for the .wsv (whitespace separated value)
+/// file format. This struct implements Iterator, so to
+/// extract the tokens use your desired iterator method
+/// or a standard for loop.
 pub struct WSVTokenizer<'wsv> {
     source: &'wsv str,
     chars: CharIndices<'wsv>,
@@ -394,10 +398,6 @@ pub struct WSVTokenizer<'wsv> {
     errored: bool,
 }
 
-/// A tokenizer for the .wsv (whitespace separated value)
-/// file format. This struct implements Iterator, so to
-/// extract the tokens use your desired iterator method
-/// or a standard for loop.
 impl<'wsv> WSVTokenizer<'wsv> {
     /// Creates a .wsv tokenizer from .wsv source text.
     pub fn new(source_text: &'wsv str) -> Self {
@@ -912,6 +912,7 @@ pub enum WSVErrorType {
     InvalidStringLineBreak,
 }
 
+/// Represents a location in the source text 
 #[derive(Debug, Default, Clone)]
 pub struct Location {
     byte_index: usize,
