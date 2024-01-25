@@ -186,6 +186,10 @@ where
         }
     }
 
+    /// Sets the column alignment of this Writer.
+    /// Note: Left and Right alignments cannot use lazy
+    /// evaluation, so do not set this value if you need 
+    /// lazy evaluation.
     pub fn align_columns(mut self, alignment: ColumnAlignment) -> Self {
         self.align_columns = alignment;
         self
@@ -642,6 +646,10 @@ impl<'wsv> Iterator for WSVTokenizer<'wsv> {
     }
 }
 
+/// A lazy tokenizer for the .wsv (whitespace separated 
+/// value) file format. This struct implements Iterator, 
+/// so to extract the tokens use your desired iterator 
+/// method or a standard for loop.
 pub struct WSVLazyTokenizer<Chars: IntoIterator<Item = char>> {
     source: Chars::IntoIter,
     peeked: Option<char>,
