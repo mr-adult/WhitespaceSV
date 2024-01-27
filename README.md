@@ -11,18 +11,18 @@ This crate provides a rust-based implementation of the [WSV standard](https://de
 
 In order to parse a WSV file using this crate, simply call one of the provided parsing functions. There are currently 3, so pick the one that makes sense for your use case. Most use cases should probably use the standard parse() function.
 1. [parse_with_col_count](https://docs.rs/whitespacesv/latest/whitespacesv/fn.parse_with_col_count.html) - use this API if it is safe to parse your WSV eagerly (it fits in memory) and your WSV is a standard table with a known number of columns. This will avoid unnecessary reallocations of the Vecs involved in parsing.
-2. [parse_lazy](https://docs.rs/whitespacesv/latest/whitespacesv/fn.parse_lazy.html) - use this API if you have a large input that should only be loaded in pieces (presumably because it doesn't fit in memory). This API will lazily parse the input line-by-line. If you need to parse at a value-by-value level, use WSVLazyTokenizer directly for full control.
+2. [parse_lazy](https://docs.rs/whitespacesv/latest/whitespacesv/fn.parse_lazy.html) - use this API if you have a large input that should only be loaded in pieces (presumably because it doesn't fit in memory). This API will lazily parse the input line-by-line. If you need to parse at a value-by-value level, use [WSVLazyTokenizer](https://docs.rs/whitespacesv/latest/whitespacesv/struct.WSVLazyTokenizer.html) directly for full control.
 3. [parse](https://docs.rs/whitespacesv/latest/whitespacesv/fn.parse.html) - use this for all other cases.
 
 ### Eager Parsing
 
-There's not a lot to say here. The eager parsing APIs work about how you would expect. They return a Result where if parsing succeeded, the result is a 2D Vec of Option<Cow<'_, str>>. The values in the Cow have handled the following cases:
+There's not a lot to say here. The eager parsing APIs work about how you would expect. They return a Result where if parsing succeeded, the value is the Ok variant with a 2D Vec of Option<Cow<'_, str>>. The values in the Cow have handled the following cases:
 1. `"/"` escape sequences have been replaced with `\n`
 2. `""` escape sequences have been replaced with `"`
 3. Any wrapping quotes will be removed. Ex. `"hello, world!"` would become `hello, world`
 4. `-` values will be returned as None variants of the Option enum. Everything else will be a Some variant.
 
-As an example, the input below would return [[Some(1), None], [Some(3), Some(String(This is a string \" with escape sequences \n))]] (quotes around the string value have been removed for clarity)
+As an example, the input below would return [[Some(1), None], [Some(3), Some(String(This is a string " with escape sequences \n))]] (quotes around the string value and `\` escape sequences have been removed for clarity)
 ```whitespacesv
 1 -
 3 "This is a string "" with escape sequences "/""
@@ -30,11 +30,11 @@ As an example, the input below would return [[Some(1), None], [Some(3), Some(Str
 
 ### Lazy Parsing
 
-This crate supports lazy parsing via iterators. By creating an iterator pipeline, you can process files that do not fit into memory. As an example, let's say I have a 300 gigabyte file where what I'd really like is the sum of each line of that file. I could set up an iterator pipeline to read the WSV and output the sums back into WSV with the code that follows.
+On top of standard parsing, this crate supports lazy parsing via iterators. By creating an iterator pipeline, you can process files that do not fit into memory. As an example, let's say I have a 300 gigabyte file where what I'd really like is the sum of each line of that file. I could set up an iterator pipeline to read the WSV and output the sums back into WSV with the code that follows.
 
-Note that the example code is still eagerly evaluating each line of the WSV. If you need finer-grain lazy parsing, use this crate's WSVLazyTokenizer directly to accomplish whatever you need.
+Note that the example code is still eagerly evaluating each line of the WSV. If you need finer-grain lazy parsing, use this crate's [WSVLazyTokenizer](https://docs.rs/whitespacesv/latest/whitespacesv/struct.WSVLazyTokenizer.html) directly to accomplish whatever you need.
 
-Some useful resources to call out here:
+The lazy parse API and WSVLazyTokenizer accept an Iterator of `char`s, so some useful resources to obtain this include the following:
 - [the utf8-chars crate](https://crates.io/crates/utf8-chars)
 - [from_utf16 in the standard library](https://doc.rust-lang.org/std/string/struct.String.html#method.from_utf16) (nightly)
 - [from_utf16le in the standard library](https://doc.rust-lang.org/std/string/struct.String.html#method.from_utf16le) (nightly)
