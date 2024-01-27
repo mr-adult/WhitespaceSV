@@ -17,7 +17,7 @@ In order to parse a WSV file using this crate, simply call one of the provided p
 
 ### Lazy Parsing
 
-This trait supports lazy parsing via iterators. By creating an iterator pipeline, you can process files that do not fit into memory. As an example, let's say I have a 300 gigabyte file where what I'd really like is the sum of each line of that file. I could set up an iterator pipeline to read the WSV and output the sums back into WSV with the code that follows.
+This crate supports lazy parsing via iterators. By creating an iterator pipeline, you can process files that do not fit into memory. As an example, let's say I have a 300 gigabyte file where what I'd really like is the sum of each line of that file. I could set up an iterator pipeline to read the WSV and output the sums back into WSV with the code that follows.
 
 Note that the example code is still eagerly evaluating each line of the WSV. If you need finer-grain lazy parsing, use this crate's WSVLazyTokenizer directly to accomplish whatever you need.
 

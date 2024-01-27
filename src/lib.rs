@@ -2,6 +2,7 @@
 
 use std::borrow::Cow;
 use std::collections::VecDeque;
+use std::iter::Enumerate;
 use std::mem::take;
 use std::str::CharIndices;
 
@@ -161,7 +162,7 @@ where
     BorrowStr: AsRef<str>,
 {
     align_columns: ColumnAlignment,
-    values: OuterIter::IntoIter,
+    values: Enumerate<OuterIter::IntoIter>,
     current_inner: Option<InnerIter::IntoIter>,
     lookahead_chars: VecDeque<char>,
 }
@@ -180,7 +181,7 @@ where
 
         Self {
             align_columns: ColumnAlignment::default(),
-            values: outer_into,
+            values: outer_into.enumerate(),
             current_inner: None,
             lookahead_chars: VecDeque::new(),
         }
@@ -188,7 +189,7 @@ where
 
     /// Sets the column alignment of this Writer.
     /// Note: Left and Right alignments cannot use lazy
-    /// evaluation, so do not set this value if you need 
+    /// evaluation, so do not set this value if you need
     /// lazy evaluation.
     pub fn align_columns(mut self, alignment: ColumnAlignment) -> Self {
         self.align_columns = alignment;
@@ -203,62 +204,69 @@ where
 
                 let vecs = self
                     .values
-                    .map(|inner| {
-                        inner
-                            .into_iter()
-                            .enumerate()
-                            .map(|(index, value)| {
-                                // Figure out 2 things while consuming the iterators:
-                                // 1. Whether or not the value needs quotes
-                                // 2. The length of the string we will be writing
-                                let mut needs_quotes = false;
-                                let mut value_len = 0;
-                                match value.as_ref() {
-                                    None => value_len = 1,
-                                    Some(val) => {
-                                        for ch in val.as_ref().chars() {
-                                            match ch {
-                                                // account for escape sequences.
-                                                '\n' => {
-                                                    value_len += 3;
-                                                    needs_quotes = true;
-                                                }
-                                                '"' => {
-                                                    value_len += 2;
-                                                    needs_quotes = true;
-                                                }
-                                                '#' => {
-                                                    value_len += 1;
-                                                    needs_quotes = true;
-                                                }
-                                                ch => {
-                                                    value_len += 1;
-                                                    needs_quotes |= ch == '#'
-                                                        || WSVTokenizer::is_whitespace(ch);
+                    .map(|(line_num, inner)| {
+                        (
+                            line_num,
+                            inner
+                                .into_iter()
+                                .enumerate()
+                                .map(|(index, value)| {
+                                    // Figure out 2 things while consuming the iterators:
+                                    // 1. Whether or not the value needs quotes
+                                    // 2. The length of the string we will be writing
+                                    let mut needs_quotes = false;
+                                    let mut value_len = 0;
+                                    match value.as_ref() {
+                                        None => value_len = 1,
+                                        Some(val) => {
+                                            for ch in val.as_ref().chars() {
+                                                match ch {
+                                                    // account for escape sequences.
+                                                    '\n' => {
+                                                        value_len += 3;
+                                                        needs_quotes = true;
+                                                    }
+                                                    '"' => {
+                                                        value_len += 2;
+                                                        needs_quotes = true;
+                                                    }
+                                                    '#' => {
+                                                        value_len += 1;
+                                                        needs_quotes = true;
+                                                    }
+                                                    ch => {
+                                                        value_len += 1;
+                                                        needs_quotes |= ch == '#'
+                                                            || WSVTokenizer::is_whitespace(ch);
+                                                    }
                                                 }
                                             }
-                                        }
-                                        if needs_quotes {
-                                            value_len += 2;
-                                        }
-                                        match max_col_widths.get_mut(index) {
-                                            None => max_col_widths.push(value_len),
-                                            Some(longest_len) => {
-                                                if value_len > *longest_len {
-                                                    *longest_len = value_len
+                                            if needs_quotes {
+                                                value_len += 2;
+                                            }
+                                            match max_col_widths.get_mut(index) {
+                                                None => max_col_widths.push(value_len),
+                                                Some(longest_len) => {
+                                                    if value_len > *longest_len {
+                                                        *longest_len = value_len
+                                                    }
                                                 }
                                             }
                                         }
                                     }
-                                }
-                                return (needs_quotes, value_len, value);
-                            })
-                            .collect::<Vec<_>>()
+                                    return (needs_quotes, value_len, value);
+                                })
+                                .collect::<Vec<_>>(),
+                        )
                     })
                     .collect::<Vec<_>>();
 
                 let mut result = String::new();
-                for line in vecs {
+                for (line_num, line) in vecs {
+                    if line_num != 0 {
+                        result.push('\n');
+                    }
+
                     for (i, col) in line.into_iter().enumerate() {
                         if i != 0 {
                             result.push(' ');
@@ -302,7 +310,6 @@ where
                             }
                         }
                     }
-                    result.push('\n')
                 }
 
                 result
@@ -369,9 +376,11 @@ where
 
             match self.values.next() {
                 None => return None,
-                Some(inner) => {
+                Some((i, inner)) => {
                     self.current_inner = Some(inner.into_iter());
-                    return Some('\n');
+                    if i != 0 {
+                        return Some('\n');
+                    }
                 }
             }
         }
@@ -646,9 +655,9 @@ impl<'wsv> Iterator for WSVTokenizer<'wsv> {
     }
 }
 
-/// A lazy tokenizer for the .wsv (whitespace separated 
-/// value) file format. This struct implements Iterator, 
-/// so to extract the tokens use your desired iterator 
+/// A lazy tokenizer for the .wsv (whitespace separated
+/// value) file format. This struct implements Iterator,
+/// so to extract the tokens use your desired iterator
 /// method or a standard for loop.
 pub struct WSVLazyTokenizer<Chars: IntoIterator<Item = char>> {
     source: Chars::IntoIter,
@@ -912,7 +921,7 @@ pub enum WSVErrorType {
     InvalidStringLineBreak,
 }
 
-/// Represents a location in the source text 
+/// Represents a location in the source text
 #[derive(Debug, Default, Clone)]
 pub struct Location {
     byte_index: usize,
@@ -954,7 +963,21 @@ mod tests {
 
     #[test]
     fn read_and_write_lazy() {
-        let str = include_str!("../tests/1_stenway.com");
+        let str = r#"a 	U+0061    61            0061        "Latin Small Letter A"
+~ 	U+007E    7E            007E        Tilde
+¥ 	U+00A5    C2_A5         00A5        "Yen Sign"
+» 	U+00BB    C2_BB         00BB        "Right-Pointing Double Angle Quotation Mark"
+½ 	U+00BD    C2_BD         00BD        "Vulgar Fraction One Half"
+¿ 	U+00BF    C2_BF         00BF        "Inverted#Question Mark" # This is a comment
+ß 	U+00DF    C3_9F         00DF        "Latin Small Letter Sharp S"
+ä 	U+00E4    C3_A4         00E4        "Latin Small Letter A with Diaeresis"
+ï 	U+00EF    C3_AF         00EF        "Latin Small Letter I with Diaeresis"
+œ 	U+0153    C5_93         0153        "Latin Small Ligature Oe"
+€ 	U+20AC    E2_82_AC      20AC        "Euro Sign"
+東 	U+6771    E6_9D_B1      6771        "CJK Unified Ideograph-6771"
+𝄞 	U+1D11E   F0_9D_84_9E   D834_DD1E   "Musical Symbol G Clef"
+𠀇 	U+20007   F0_A0_80_87   D840_DC07   "CJK Unified Ideograph-20007"
+-   hyphen    qwro-qweb     -dasbe      "A hyphen character - represents null""#;
         let result = parse_lazy(str.chars());
 
         let result = result.map(|line| {
@@ -977,118 +1000,254 @@ mod tests {
         let str = include_str!("../tests/1_stenway.com");
         let result = parse(str);
 
-        match result {
-            Err(_) => panic!("Should not have error"),
-            Ok(values) => {
-                let expected = vec![
-                    vec!["a", "U+0061", "61", "0061", "Latin Small Letter A"],
-                    vec!["~", "U+007E", "7E", "007E", "Tilde"],
-                    vec!["¥", "U+00A5", "C2_A5", "00A5", "Yen Sign"],
-                    vec![
-                        "»",
-                        "U+00BB",
-                        "C2_BB",
-                        "00BB",
-                        "Right-Pointing Double Angle Quotation Mark",
-                    ],
-                    vec!["½", "U+00BD", "C2_BD", "00BD", "Vulgar Fraction One Half"],
-                    vec!["¿", "U+00BF", "C2_BF", "00BF", "Inverted#Question Mark"],
-                    vec!["ß", "U+00DF", "C3_9F", "00DF", "Latin Small Letter Sharp S"],
-                    vec![
-                        "ä",
-                        "U+00E4",
-                        "C3_A4",
-                        "00E4",
-                        "Latin Small Letter A with Diaeresis",
-                    ],
-                    vec![
-                        "ï",
-                        "U+00EF",
-                        "C3_AF",
-                        "00EF",
-                        "Latin Small Letter I with Diaeresis",
-                    ],
-                    vec!["œ", "U+0153", "C5_93", "0153", "Latin Small Ligature Oe"],
-                    vec!["€", "U+20AC", "E2_82_AC", "20AC", "Euro Sign"],
-                    vec![
-                        "東",
-                        "U+6771",
-                        "E6_9D_B1",
-                        "6771",
-                        "CJK Unified Ideograph-6771",
-                    ],
-                    vec![
-                        "𝄞",
-                        "U+1D11E",
-                        "F0_9D_84_9E",
-                        "D834_DD1E",
-                        "Musical Symbol G Clef",
-                    ],
-                    vec![
-                        "𠀇",
-                        "U+20007",
-                        "F0_A0_80_87",
-                        "D840_DC07",
-                        "CJK Unified Ideograph-20007",
-                    ],
-                    vec![
-                        "-",
-                        "hyphen",
-                        "qwro-qweb",
-                        "-dasbe",
-                        "A hyphen character - represents null",
-                    ],
-                ];
+        let assert_matches_expected =
+            |result: Result<Vec<Vec<Option<Cow<'_, str>>>>, WSVError>| match result {
+                Err(_) => panic!("Should not have error"),
+                Ok(values) => {
+                    let expected = vec![
+                        vec!["a", "U+0061", "61", "0061", "Latin Small Letter A"],
+                        vec!["~", "U+007E", "7E", "007E", "Tilde"],
+                        vec!["¥", "U+00A5", "C2_A5", "00A5", "Yen Sign"],
+                        vec![
+                            "»",
+                            "U+00BB",
+                            "C2_BB",
+                            "00BB",
+                            "Right-Pointing Double Angle Quotation Mark",
+                        ],
+                        vec!["½", "U+00BD", "C2_BD", "00BD", "Vulgar Fraction One Half"],
+                        vec!["¿", "U+00BF", "C2_BF", "00BF", "Inverted#Question Mark"],
+                        vec!["ß", "U+00DF", "C3_9F", "00DF", "Latin Small Letter Sharp S"],
+                        vec![
+                            "ä",
+                            "U+00E4",
+                            "C3_A4",
+                            "00E4",
+                            "Latin Small Letter A with Diaeresis",
+                        ],
+                        vec![
+                            "ï",
+                            "U+00EF",
+                            "C3_AF",
+                            "00EF",
+                            "Latin Small Letter I with Diaeresis",
+                        ],
+                        vec!["œ", "U+0153", "C5_93", "0153", "Latin Small Ligature Oe"],
+                        vec!["€", "U+20AC", "E2_82_AC", "20AC", "Euro Sign"],
+                        vec![
+                            "東",
+                            "U+6771",
+                            "E6_9D_B1",
+                            "6771",
+                            "CJK Unified Ideograph-6771",
+                        ],
+                        vec![
+                            "𝄞",
+                            "U+1D11E",
+                            "F0_9D_84_9E",
+                            "D834_DD1E",
+                            "Musical Symbol G Clef",
+                        ],
+                        vec![
+                            "𠀇",
+                            "U+20007",
+                            "F0_A0_80_87",
+                            "D840_DC07",
+                            "CJK Unified Ideograph-20007",
+                        ],
+                        vec![
+                            "-",
+                            "hyphen",
+                            "qwro-qweb",
+                            "-dasbe",
+                            "A hyphen character - represents null",
+                        ],
+                    ];
 
-                let mut expected_iter = expected.into_iter();
-                let mut acutal_iter = values.into_iter();
+                    let mut expected_iter = expected.into_iter();
+                    let mut acutal_iter = values.into_iter();
 
-                loop {
-                    let expected_line = expected_iter.next();
-                    let actual_line = acutal_iter.next();
-
-                    assert_eq!(
-                        expected_line.is_some(),
-                        actual_line.is_some(),
-                        "Line numbers should match"
-                    );
-                    if expected_line.is_none() || actual_line.is_none() {
-                        break;
-                    }
-
-                    let mut expected_value_iter = expected_line.unwrap().into_iter();
-                    let mut actual_value_iter = actual_line.unwrap().into_iter();
                     loop {
-                        let expected_value = expected_value_iter.next();
-                        let actual_value = actual_value_iter.next();
+                        let expected_line = expected_iter.next();
+                        let actual_line = acutal_iter.next();
 
                         assert_eq!(
-                            expected_value.is_some(),
-                            expected_value.is_some(),
-                            "Value counts should match"
+                            expected_line.is_some(),
+                            actual_line.is_some(),
+                            "Line numbers should match"
                         );
-                        if expected_value.is_none() || actual_value.is_none() {
+                        if expected_line.is_none() || actual_line.is_none() {
                             break;
                         }
 
-                        if expected_value.unwrap() == "-" {
-                            assert_eq!(None, actual_value.unwrap(), "'-' should parse to None");
-                        } else {
-                            let actual_value = actual_value
+                        let mut expected_value_iter = expected_line.unwrap().into_iter();
+                        let mut actual_value_iter = actual_line.unwrap().into_iter();
+                        loop {
+                            let expected_value = expected_value_iter.next();
+                            let actual_value = actual_value_iter.next();
+
+                            assert_eq!(
+                                expected_value.is_some(),
+                                expected_value.is_some(),
+                                "Value counts should match"
+                            );
+                            if expected_value.is_none() || actual_value.is_none() {
+                                break;
+                            }
+
+                            if expected_value.unwrap() == "-" {
+                                assert_eq!(None, actual_value.unwrap(), "'-' should parse to None");
+                            } else {
+                                let actual_value = actual_value
                                 .expect("Actual value to be populated at this poitn.")
                                 .expect(
                                     "actual value should parse to Some() if expected is not '-'",
                                 );
-                            assert_eq!(
-                                expected_value.unwrap().to_owned(),
-                                actual_value.to_owned(),
-                                "string values should match"
-                            );
+                                let expected = expected_value.as_ref().unwrap();
+                                let actual = actual_value.as_ref();
+                                if expected_value.unwrap().to_owned() != actual_value.to_owned() {
+                                    println!("Mismatch: \nExpected: {expected}\nActual: {actual}");
+                                    panic!();
+                                }
+                            }
                         }
                     }
                 }
+            };
+
+        assert_matches_expected(result);
+
+        let parsed = parse(str).unwrap();
+        let written = WSVWriter::new(parsed).to_string();
+        println!("Writer output: {}", written);
+        let reparsed = parse(&written);
+        println!("Reparsed: {:?}", reparsed);
+        assert_matches_expected(reparsed);
+    }
+
+    #[test]
+    fn e2e_test_lazy() {
+        let str = include_str!("../tests/1_stenway.com");
+        let result = parse_lazy(str.chars())
+            .map(|line| line.unwrap())
+            .collect::<Vec<_>>();
+
+        let assert_matches_expected = |values: Vec<Vec<Option<String>>>| {
+            let expected = vec![
+                vec!["a", "U+0061", "61", "0061", "Latin Small Letter A"],
+                vec!["~", "U+007E", "7E", "007E", "Tilde"],
+                vec!["¥", "U+00A5", "C2_A5", "00A5", "Yen Sign"],
+                vec![
+                    "»",
+                    "U+00BB",
+                    "C2_BB",
+                    "00BB",
+                    "Right-Pointing Double Angle Quotation Mark",
+                ],
+                vec!["½", "U+00BD", "C2_BD", "00BD", "Vulgar Fraction One Half"],
+                vec!["¿", "U+00BF", "C2_BF", "00BF", "Inverted#Question Mark"],
+                vec!["ß", "U+00DF", "C3_9F", "00DF", "Latin Small Letter Sharp S"],
+                vec![
+                    "ä",
+                    "U+00E4",
+                    "C3_A4",
+                    "00E4",
+                    "Latin Small Letter A with Diaeresis",
+                ],
+                vec![
+                    "ï",
+                    "U+00EF",
+                    "C3_AF",
+                    "00EF",
+                    "Latin Small Letter I with Diaeresis",
+                ],
+                vec!["œ", "U+0153", "C5_93", "0153", "Latin Small Ligature Oe"],
+                vec!["€", "U+20AC", "E2_82_AC", "20AC", "Euro Sign"],
+                vec![
+                    "東",
+                    "U+6771",
+                    "E6_9D_B1",
+                    "6771",
+                    "CJK Unified Ideograph-6771",
+                ],
+                vec![
+                    "𝄞",
+                    "U+1D11E",
+                    "F0_9D_84_9E",
+                    "D834_DD1E",
+                    "Musical Symbol G Clef",
+                ],
+                vec![
+                    "𠀇",
+                    "U+20007",
+                    "F0_A0_80_87",
+                    "D840_DC07",
+                    "CJK Unified Ideograph-20007",
+                ],
+                vec![
+                    "-",
+                    "hyphen",
+                    "qwro-qweb",
+                    "-dasbe",
+                    "A hyphen character - represents null",
+                ],
+            ];
+
+            let mut expected_iter = expected.into_iter();
+            let mut acutal_iter = values.into_iter();
+
+            loop {
+                let expected_line = expected_iter.next();
+                let actual_line = acutal_iter.next();
+
+                assert_eq!(
+                    expected_line.is_some(),
+                    actual_line.is_some(),
+                    "Line numbers should match"
+                );
+                if expected_line.is_none() || actual_line.is_none() {
+                    break;
+                }
+
+                let mut expected_value_iter = expected_line.unwrap().into_iter();
+                let mut actual_value_iter = actual_line.unwrap().into_iter();
+                loop {
+                    let expected_value = expected_value_iter.next();
+                    let actual_value = actual_value_iter.next();
+
+                    assert_eq!(
+                        expected_value.is_some(),
+                        expected_value.is_some(),
+                        "Value counts should match"
+                    );
+                    if expected_value.is_none() || actual_value.is_none() {
+                        break;
+                    }
+
+                    if expected_value.unwrap() == "-" {
+                        assert_eq!(None, actual_value.unwrap(), "'-' should parse to None");
+                    } else {
+                        let actual_value = actual_value
+                            .expect("Actual value to be populated at this poitn.")
+                            .expect("actual value should parse to Some() if expected is not '-'");
+                        assert_eq!(
+                            expected_value.unwrap().to_owned(),
+                            actual_value.to_owned(),
+                            "string values should match"
+                        );
+                    }
+                }
             }
-        }
+        };
+
+        assert_matches_expected(result);
+
+        let parsed = parse(str).unwrap();
+        let written = WSVWriter::new(parsed).to_string();
+        let reparsed = parse_lazy(written.chars())
+            .map(|line| line.unwrap())
+            .collect();
+        assert_matches_expected(reparsed);
     }
 
     #[test]
@@ -1368,7 +1527,8 @@ mod tests {
         let lines = parse_lazy(chars).map(|line| {
             // You probably want to handle errors in your case
             // unless you are guaranteed to have valid WSV.
-            let sum = line.unwrap()
+            let sum = line
+                .unwrap()
                 .into_iter()
                 // We're counting None as 0, so flat_map them out.
                 .flat_map(|opt| opt)
