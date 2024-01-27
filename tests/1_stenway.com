@@ -1,5 +1,5 @@
-a 	U+0061    61            0061        "Latin Small Letter A"
-~ 	U+007E    7E            007E        Tilde
+a 	U+0061    61            0061        "Latin Small Letter A"          ""/""""""
+~ 	U+007E    7E            007E        Tilde                   
 ¥ 	U+00A5    C2_A5         00A5        "Yen Sign"
 » 	U+00BB    C2_BB         00BB        "Right-Pointing Double Angle Quotation Mark"
 ½ 	U+00BD    C2_BD         00BD        "Vulgar Fraction One Half"

@@ -458,9 +458,7 @@ impl<'wsv> WSVTokenizer<'wsv> {
                     self.errored = true;
                     return Some(Err(WSVError {
                         err_type: WSVErrorType::StringNotClosed,
-                        location: self
-                            .peek_location()
-                            .expect("BUG: peek_location() return Some()"),
+                        location: self.current_location.clone()
                     }));
                 }
             } else if let None = chunk_start {
@@ -474,7 +472,6 @@ impl<'wsv> WSVTokenizer<'wsv> {
                     location: self.peek_location().into_iter().next().unwrap_or_else(|| {
                         let mut loc = self.current_location.clone();
                         loc.byte_index = self.source.len();
-                        loc.col += 1;
                         return loc;
                     }),
                 }));
@@ -537,7 +534,7 @@ impl<'wsv> WSVTokenizer<'wsv> {
                     Some((i, ch)) => {
                         if ch == NEWLINE {
                             self.current_location.line += 1;
-                            self.current_location.col = 0;
+                            self.current_location.col = 1;
                         } else {
                             self.current_location.col += 1;
                         }
@@ -708,9 +705,7 @@ where
                     self.errored = true;
                     return Some(Err(WSVError {
                         err_type: WSVErrorType::StringNotClosed,
-                        location: self
-                            .peek_location()
-                            .expect("BUG: peek_location() return Some()"),
+                        location: self.current_location.clone(),
                     }));
                 }
             } else if let Some(ch) = self.match_char_if(&mut |_| true) {
@@ -718,11 +713,7 @@ where
             } else {
                 return Some(Err(WSVError {
                     err_type: WSVErrorType::StringNotClosed,
-                    location: self.peek_location().into_iter().next().unwrap_or_else(|| {
-                        let mut loc = self.current_location.clone();
-                        loc.col += 1;
-                        return loc;
-                    }),
+                    location: self.peek_location().into_iter().next().unwrap_or_else(|| self.current_location.clone())
                 }));
             }
         }
@@ -759,7 +750,15 @@ where
                     None => {
                         return None;
                     }
-                    Some(ch) => return Some(ch),
+                    Some(ch) => {
+                        if ch == NEWLINE {
+                            self.current_location.line += 1;
+                            self.current_location.col = 1;
+                        } else {
+                            self.current_location.col += 1;
+                        }
+                        return Some(ch);
+                    }
                 }
             }
         }
@@ -922,7 +921,7 @@ pub enum WSVErrorType {
 }
 
 /// Represents a location in the source text
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct Location {
     byte_index: usize,
     line: usize,
@@ -937,6 +936,16 @@ impl Location {
     /// The column number in the source text.
     pub fn col(&self) -> usize {
         self.col
+    }
+}
+
+impl Default for Location {
+    fn default() -> Self {
+        Self {
+            byte_index: 0,
+            line: 1,
+            col: 1,
+        }
     }
 }
 
@@ -1005,7 +1014,14 @@ mod tests {
                 Err(_) => panic!("Should not have error"),
                 Ok(values) => {
                     let expected = vec![
-                        vec!["a", "U+0061", "61", "0061", "Latin Small Letter A"],
+                        vec![
+                            "a",
+                            "U+0061",
+                            "61",
+                            "0061",
+                            "Latin Small Letter A",
+                            "\n\"\"",
+                        ],
                         vec!["~", "U+007E", "7E", "007E", "Tilde"],
                         vec!["¥", "U+00A5", "C2_A5", "00A5", "Yen Sign"],
                         vec![
@@ -1134,7 +1150,14 @@ mod tests {
 
         let assert_matches_expected = |values: Vec<Vec<Option<String>>>| {
             let expected = vec![
-                vec!["a", "U+0061", "61", "0061", "Latin Small Letter A"],
+                vec![
+                    "a",
+                    "U+0061",
+                    "61",
+                    "0061",
+                    "Latin Small Letter A",
+                    "\n\"\"",
+                ],
                 vec!["~", "U+007E", "7E", "007E", "Tilde"],
                 vec!["¥", "U+00A5", "C2_A5", "00A5", "Yen Sign"],
                 vec![
@@ -1252,28 +1275,42 @@ mod tests {
 
     #[test]
     fn readme_example_write() {
-        use crate::{ColumnAlignment, WSVWriter};
-        // Build up the testing value set. This API accepts any
-        // type that implements IntoIterator, so LinkedList,
-        // VecDeque and many others are accepted as well.
-        let values = vec![
-            vec!["1", "2", "3"],
-            vec!["4", "5", "6"],
-            vec!["My string with a \n character"],
-            vec!["My string with many \"\"\" characters"],
-        ];
+        use std::fs::File;
+        use std::io::BufReader;
+        // I recommend you pull in the utf8-chars crate as a dependency if
+        // you need lazy parsing
+        use crate::{parse_lazy, WSVWriter};
+        use utf8_chars::BufReadCharsExt;
 
-        let values_as_opts = values
-            .into_iter()
-            .map(|row| row.into_iter().map(|value| Some(value)));
+        let mut reader = BufReader::new(File::open("./my_very_large_file.txt").unwrap());
 
-        let wsv = WSVWriter::new(values_as_opts)
-            // The default is packed, but left and right are also options
-            // if your .wsv file will be looked at by people
-            .align_columns(ColumnAlignment::Left)
-            .to_string();
+        let chars = reader.chars().map(|ch| ch.unwrap());
 
-        println!("{}", wsv);
+        let lines_lazy = parse_lazy(chars).map(|line| {
+            // For this example we will assume we have valid WSV
+            let sum = line
+                .unwrap()
+                .into_iter()
+                // We're counting None as 0 in my case,
+                // so flat_map the Nones out.
+                .flat_map(|opt| opt)
+                .map(|value| value.parse::<i32>().unwrap_or(0))
+                .sum::<i32>();
+
+            // The writer needs a 2D iterator of Option<String>,
+            // so wrap the value in a Some and .to_string() it.
+            // Also wrap in a Vec to make it a 2D iterator
+            vec![Some(sum.to_string())]
+        });
+        // CAREFUL: Don't call .collect() here or we'll run out of memory!
+
+        // The WSVWriter when using ColumnAlignment::Packed
+        // (the default) is also lazy, so we can pass our
+        // result in directly.
+        for ch in WSVWriter::new(lines_lazy) {
+            // Your code to dump the output to a file goes here.
+            print!("{}", ch);
+        }
     }
 
     #[test]
@@ -1541,6 +1578,25 @@ mod tests {
         for ch in WSVWriter::new(lines) {
             // Your code to dump the output to a file goes here.
             print!("{}", ch)
+        }
+    }
+
+    #[test]
+    fn error_location_reporting_is_correct() {
+        let input = r#"some values would go here
+        and this is a second line,
+        but the realy error happens
+"here where the string is unclosed.
+"#;
+
+        for result in WSVLazyTokenizer::new(input.chars()) {
+            match result {
+                Ok(_) => {}
+                Err(err) => {
+                    assert_eq!(4, err.location().line());
+                    assert_eq!(36, err.location().col());
+                }
+            }
         }
     }
 }
