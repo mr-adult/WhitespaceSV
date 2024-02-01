@@ -2,6 +2,8 @@
 
 use std::borrow::Cow;
 use std::collections::VecDeque;
+use std::error::Error;
+use std::fmt::Display;
 use std::iter::Enumerate;
 use std::mem::take;
 use std::str::CharIndices;
@@ -78,6 +80,8 @@ pub fn parse_lazy<Chars: IntoIterator<Item = char>>(source_text: Chars) -> WSVLi
     WSVLineIterator::new(source_text)
 }
 
+/// An iterator over the lines of a WSV file. This is used to allow lazy
+/// parsing of files that do not fit into memory.
 pub struct WSVLineIterator<Chars>
 where
     Chars: IntoIterator<Item = char>,
@@ -871,6 +875,7 @@ where
     }
 }
 
+/// A collection of all token types in a WSV file.
 #[derive(Debug, Clone)]
 pub enum WSVToken<'wsv> {
     /// Represents a line feed character (ex. '\n')
@@ -883,6 +888,7 @@ pub enum WSVToken<'wsv> {
     Comment(&'wsv str),
 }
 
+/// A collection of all token types in a WSV file.
 pub enum OwnedWSVToken {
     /// Represents a line feed character (ex. '\n')
     LF,
@@ -894,6 +900,9 @@ pub enum OwnedWSVToken {
     Comment(String),
 }
 
+/// A struct to represent an error in a WSV file. This contains
+/// both the type of error and location of the error in the source
+/// text.
 #[derive(Debug, Clone)]
 pub struct WSVError {
     err_type: WSVErrorType,
@@ -909,6 +918,38 @@ impl WSVError {
         self.location.clone()
     }
 }
+
+impl Display for WSVError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut description = String::new();
+
+        let location = self.location();
+        description.push_str("(line: ");
+        description.push_str(&location.line().to_string());
+        description.push_str(", column: ");
+        description.push_str(&location.col().to_string());
+        description.push_str(") ");
+
+        match self.err_type() {
+            WSVErrorType::InvalidCharacterAfterString => {
+                description.push_str("Invalid Character After String");
+            }
+            WSVErrorType::InvalidDoubleQuoteAfterValue => {
+                description.push_str("Invalid Double Quote After Value");
+            }
+            WSVErrorType::InvalidStringLineBreak => {
+                description.push_str("Invalid String Line Break");
+            }
+            WSVErrorType::StringNotClosed => {
+                description.push_str("String Not Closed");
+            }
+        }
+        
+        write!(f, "{}", description)?;
+        Ok(())
+    }
+}
+impl Error for WSVError {}
 
 /// For details on these error types, see the Parser Errors
 /// section of [https://dev.stenway.com/WSV/Specification.html](https://dev.stenway.com/WSV/Specification.html)
