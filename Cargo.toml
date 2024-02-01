@@ -1,6 +1,6 @@
 [package]
 name = "whitespacesv"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2021"
 description = "A Rust implementation of a parser/writer for the Whitespace-Separated Value format, as defined by Stenway. See https://dev.stenway.com/WSV/. WSV offers an unambiguous alternative to CSV."
 license = "MIT"
