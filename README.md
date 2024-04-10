@@ -7,6 +7,12 @@ Whitespace Separated Value (WSV) is a file format that has been designed to addr
 This crate provides a rust-based implementation of the [WSV standard](https://dev.stenway.com/WSV/Index.html). This implementation aims to be as efficient as possible. In eager (non-lazy or standard) parsing, this parser is as close to zero copy as possible. It will only allocate strings in cases where escape sequences must be replaced. There are only a handful of APIs exposed in the crate, but they should be able to handle all of your use cases.
 
 
+## Patch Notes
+
+### 1.0.2
+Fixes [a panic when writing jagged arrays](https://github.com/mr-adult/WhitespaceSV/issues/1)
+
+
 ## Parsing
 
 In order to parse a WSV file using this crate, simply call one of the provided parsing functions. There are currently 3, so pick the one that makes sense for your use case. Most use cases should probably use the standard parse() function.
