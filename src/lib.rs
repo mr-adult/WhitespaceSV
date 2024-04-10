@@ -463,7 +463,7 @@ impl<'wsv> WSVTokenizer<'wsv> {
                     self.errored = true;
                     return Some(Err(WSVError {
                         err_type: WSVErrorType::StringNotClosed,
-                        location: self.current_location.clone()
+                        location: self.current_location.clone(),
                     }));
                 }
             } else if let None = chunk_start {
@@ -718,7 +718,11 @@ where
             } else {
                 return Some(Err(WSVError {
                     err_type: WSVErrorType::StringNotClosed,
-                    location: self.peek_location().into_iter().next().unwrap_or_else(|| self.current_location.clone())
+                    location: self
+                        .peek_location()
+                        .into_iter()
+                        .next()
+                        .unwrap_or_else(|| self.current_location.clone()),
                 }));
             }
         }
