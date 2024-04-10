@@ -245,16 +245,17 @@ where
                                                     }
                                                 }
                                             }
-                                            if needs_quotes {
-                                                value_len += 2;
-                                            }
-                                            match max_col_widths.get_mut(index) {
-                                                None => max_col_widths.push(value_len),
-                                                Some(longest_len) => {
-                                                    if value_len > *longest_len {
-                                                        *longest_len = value_len
-                                                    }
-                                                }
+                                        }
+                                    }
+
+                                    if needs_quotes {
+                                        value_len += 2;
+                                    }
+                                    match max_col_widths.get_mut(index) {
+                                        None => max_col_widths.push(value_len),
+                                        Some(longest_len) => {
+                                            if value_len > *longest_len {
+                                                *longest_len = value_len
                                             }
                                         }
                                     }
@@ -944,7 +945,7 @@ impl Display for WSVError {
                 description.push_str("String Not Closed");
             }
         }
-        
+
         write!(f, "{}", description)?;
         Ok(())
     }
@@ -1639,5 +1640,12 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn jagged_array_no_panic() {
+        super::WSVWriter::new([vec![Some("1")], vec![Some("3"), None]])
+            .align_columns(super::ColumnAlignment::Left)
+            .to_string();
     }
 }
