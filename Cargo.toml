@@ -13,4 +13,4 @@ keywords = ["wsv", "whitespace", "separated", "value", "ReliableTXT"]
 [dependencies]
 
 [dev-dependencies]
-utf8-chars = "3.0.1"
+utf8-chars = "3.0.2"
