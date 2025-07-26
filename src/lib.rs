@@ -175,7 +175,7 @@ impl<OuterIter, InnerIter, BorrowStr> WSVWriter<OuterIter, InnerIter, BorrowStr>
 where
     OuterIter: Iterator<Item = InnerIter>,
     InnerIter: IntoIterator<Item = Option<BorrowStr>>,
-    BorrowStr: AsRef<str> + From<&'static str> + ToString,
+    BorrowStr: AsRef<str> + ToString,
 {
     pub fn new<OuterInto>(values: OuterInto) -> Self
     where
@@ -327,7 +327,7 @@ impl<OuterIter, InnerIter, BorrowStr> Iterator for WSVWriter<OuterIter, InnerIte
 where
     OuterIter: Iterator<Item = InnerIter>,
     InnerIter: IntoIterator<Item = Option<BorrowStr>>,
-    BorrowStr: AsRef<str> + From<&'static str> + ToString,
+    BorrowStr: AsRef<str> + ToString,
 {
     type Item = char;
     fn next(&mut self) -> Option<Self::Item> {
