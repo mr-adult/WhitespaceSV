@@ -9,6 +9,9 @@ This crate provides a rust-based implementation of the [WSV standard](https://de
 
 ## Patch Notes
 
+### 1.0.3
+Removes the From<&'static str> generic type constraint on WSVWriter
+
 ### 1.0.2
 Fixes [a panic when writing jagged arrays](https://github.com/mr-adult/WhitespaceSV/issues/1)
 
